@@ -12,9 +12,9 @@
       fields: [
         { id: 'age', label: 'あなたの年齢', type: 'number', unit: '歳', required: true },
         { id: 'spouse', label: '配偶者・パートナー', type: 'chips', options: [['none', 'なし'], ['yes', 'あり']] },
-        { id: 'spouseAge', label: '配偶者・パートナーの年齢', type: 'number', unit: '歳', when: function (a) { return a.spouse === 'yes'; } },
+        { id: 'spouseAge', label: '配偶者・パートナーの年齢', type: 'number', unit: '歳', parent: 'spouse', when: function (a) { return a.spouse === 'yes'; } },
         { id: 'kids', label: '子どもの人数', type: 'chips', options: [['0', '0人'], ['1', '1人'], ['2', '2人'], ['3', '3人以上']] },
-        { id: 'youngestAge', label: '末っ子の年齢', type: 'number', unit: '歳', hint: '生まれる予定なら 0', when: function (a) { return Number(a.kids) > 0; } },
+        { id: 'youngestAge', label: '末っ子の年齢', type: 'number', unit: '歳', hint: '生まれる予定なら 0', parent: 'kids', when: function (a) { return Number(a.kids) > 0; } },
         { id: 'grossIncome', label: '世帯の年収（額面・税込）', type: 'number', unit: '万円', required: true, hint: '共働きなら2人の合計。源泉徴収票の「支払金額」' },
         { id: 'netIncome', label: '世帯の手取り年収', type: 'number', unit: '万円', unknown: true, hint: 'ボーナス込みで1年に口座へ入る額' },
         { id: 'otherDebt', label: '住宅以外の借入の年間返済額', type: 'number', unit: '万円', hint: '車のローン・奨学金など。なければ 0' },
@@ -50,7 +50,7 @@
       fields: [
         { id: 'ownFunds', label: '自己資金として出す額', type: 'number', unit: '万円', hint: '頭金と諸費用のうち、現金で払う額' },
         { id: 'loan', label: '借入額', type: 'number', unit: '万円', required: true, suggest: true },
-        { id: 'years', label: '返済期間', type: 'number', unit: '年', required: true },
+        { id: 'years', label: '返済期間', type: 'number', unit: '年', required: true, hint: 'よく選ばれる35年を最初から入れてあります。違えば直してください' },
         { id: 'rate', label: '金利', type: 'number', unit: '%', required: true, step: '0.001', hint: '見積もりや銀行サイトに書かれた、今検討している金利' },
         { id: 'rateType', label: '金利のタイプ', type: 'chips', options: [['variable', '変動'], ['fixedTerm', '固定期間選択'], ['fixed', '全期間固定'], ['mixed', 'ミックス'], ['undecided', '未定']] }
       ]
@@ -107,11 +107,26 @@
     return e;
   }
 
-  function toast(msg) {
+  var toastTimer;
+  function toast(msg, ms) {
     var t = document.getElementById('toast');
     t.textContent = msg;
     t.classList.add('show');
-    setTimeout(function () { t.classList.remove('show'); }, 1800);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, ms || 1800);
+  }
+
+  // 入力欄のその場で ✓ を付ける（入力欄を離れたときに値が正しければ）
+  function markField(f, ok) {
+    var b = document.getElementById('qb-' + f.id);
+    var st = ok ? fieldStatus(f) : 'todo';
+    if (b) {
+      var was = b.className;
+      b.className = 'qbox ' + st;
+      b.textContent = st === 'done' ? '✓' : st === 'unknown' ? '?' : '';
+      if (st !== 'todo' && was.indexOf(st) < 0) { b.classList.add('pop'); }
+    }
+    renderChecklist();
   }
 
   function bar(buttons) {
@@ -155,18 +170,48 @@
     return STEPS[si].fields.filter(function (f) { return !f.when || f.when(state.answers); });
   }
 
+  // 数える単位。条件付きの項目（配偶者の年齢など）は親の項目に含め、選び方で分母が増えないようにする
+  function slots(si) {
+    return STEPS[si].fields.filter(function (f) { return !f.when; });
+  }
+  function children(f) {
+    return STEPS.reduce(function (acc, s) {
+      return acc.concat(s.fields.filter(function (c) { return c.parent === f.id && c.when(state.answers); }));
+    }, []);
+  }
+  function slotStatus(f) {
+    var st = fieldStatus(f);
+    if (st === 'todo') return 'todo';
+    var kidTodo = children(f).some(function (c) { return fieldStatus(c) === 'todo'; });
+    return kidTodo ? 'todo' : st;
+  }
+  function tally() {
+    var t = { total: 0, filled: 0, reqLeft: 0, per: [] };
+    STEPS.forEach(function (s, si) {
+      var p = { total: 0, filled: 0 };
+      slots(si).forEach(function (f) {
+        var st = slotStatus(f);
+        p.total++; t.total++;
+        if (st !== 'todo') { p.filled++; t.filled++; }
+        else if (f.required) t.reqLeft++;
+      });
+      t.per.push(p);
+    });
+    return t;
+  }
+
+  var lastFilled = null;
   function renderChecklist() {
+    var t = tally();
+    renderProgress(t);
     if (!side) return;
     side.innerHTML = '';
     if (state.step < 0) { side.hidden = true; document.body.classList.remove('has-side'); return; }
     side.hidden = false;
     document.body.classList.add('has-side');
-    var total = 0, filled = 0;
     var groups = STEPS.map(function (s, si) {
-      var items = visibleFields(si).map(function (f) {
-        var st = fieldStatus(f);
-        total++;
-        if (st !== 'todo') filled++;
+      var items = slots(si).map(function (f) {
+        var st = slotStatus(f);
         var mark = st === 'done' ? '✓' : st === 'unknown' ? '?' : '';
         return el('li', {}, [el('button', { type: 'button', class: 'ck ' + st + (f.required ? ' req' : ''),
           onclick: function () { jumpTo(si, f.id); } }, [
@@ -176,25 +221,49 @@
         ])]);
       });
       return el('div', { class: 'grp' + (si === state.step ? ' cur' : '') }, [
-        el('div', { class: 'gt', text: (si + 1) + '. ' + s.title }),
+        el('div', { class: 'gt', text: (si + 1) + '. ' + s.title + '　' + t.per[si].filled + ' / ' + t.per[si].total }),
         el('ul', {}, items)
       ]);
     });
     var open = !!state.sideOpen;
-    var head = el('button', { type: 'button', class: 'sidehead', 'aria-expanded': String(open), onclick: function () {
-      state.sideOpen = !state.sideOpen; save(); renderChecklist();
-    } }, [
+    side.classList.toggle('open', open);
+    var head = el('div', { class: 'sidehead' }, [
       el('span', { text: 'チェックリスト' }),
-      el('b', { text: filled + ' / ' + total }),
-      el('span', { class: 'chev', 'aria-hidden': 'true', text: open ? '▲' : '▼' })
+      el('b', { text: t.filled + ' / ' + t.total + ' 入力済み' }),
+      el('button', { type: 'button', class: 'close', 'aria-label': '閉じる', text: '閉じる', onclick: toggleSheet })
     ]);
-    var meter = el('div', { class: 'progress' }, [el('i', { style: 'width:' + (total ? Math.round(filled / total * 100) : 0) + '%' })]);
-    side.appendChild(el('div', { class: 'sidein' + (open ? ' open' : '') }, [head, meter,
-      el('div', { class: 'list' }, groups.concat([el('p', { class: 'sub legend', text: '✓ 入力済み　? 分からない（AIが聞き返します）' })]))]));
+    var meter = el('div', { class: 'progress' }, [el('i', { style: 'width:' + Math.round(t.filled / t.total * 100) + '%' })]);
+    side.appendChild(el('div', { class: 'sidein' }, [head, meter,
+      el('div', { class: 'list' }, groups.concat([el('p', { class: 'sub legend', text: '✓ 入力済み　? 分からない（AIが聞き返します）　項目をタップするとそこへ移動します' })]))]));
+  }
+
+  function toggleSheet() {
+    state.sideOpen = !state.sideOpen;
+    save();
+    renderChecklist();
+  }
+
+  // 下のバーの上に出す進み具合（スマホでは親指の届く位置）。タップでチェックリストを開く
+  function renderProgress(t) {
+    var p = document.getElementById('prog');
+    if (!p) return;
+    if (state.step < 0 || state.step >= STEPS.length) { p.hidden = true; return; }
+    p.hidden = false;
+    p.innerHTML = '';
+    var gained = lastFilled !== null && t.filled > lastFilled ? t.filled - lastFilled : 0;
+    lastFilled = t.filled;
+    p.appendChild(el('button', { type: 'button', class: 'progbtn', 'aria-expanded': String(!!state.sideOpen), onclick: toggleSheet }, [
+      el('span', { class: 'count' }, [el('b', { text: String(t.filled) }), document.createTextNode(' / ' + t.total + ' 入力済み')]),
+      gained ? el('span', { class: 'plus', 'aria-hidden': 'true', text: '+' + gained }) : null,
+      el('span', { class: 'left', text: t.reqLeft ? '必須あと' + t.reqLeft : '必須はそろいました' }),
+      el('span', { class: 'open', text: 'チェックリスト' })
+    ]));
+    p.appendChild(el('div', { class: 'progress' }, [el('i', { style: 'width:' + Math.round(t.filled / t.total * 100) + '%' })]));
   }
 
   function jumpTo(si, id) {
     state.sideOpen = false;
+    save();
     if (state.step !== si) go(si); else renderChecklist();
     var box = document.getElementById('f-' + id);
     if (!box) return;
@@ -261,13 +330,43 @@
 
   // ---- 画面 ----
 
+  // 最初の画面で、これから聞く項目の全体像を見せる（入力済みなら ✓ が付いた状態で）
+  // 最初の画面で全体像を見せる。項目を全部並べると多く見えるので、区分ごとの行にして中身は1行で示す
+  function renderOverview() {
+    var t = tally();
+    var reqTotal = 0;
+    STEPS.forEach(function (s) { s.fields.forEach(function (f) { if (f.required) reqTotal++; }); });
+    var rows = STEPS.map(function (s, si) {
+      var p = t.per[si];
+      var st = p.filled === p.total ? 'done' : p.filled ? 'some' : 'todo';
+      return el('button', { type: 'button', class: 'ovrow ' + st, onclick: function () { go(si); } }, [
+        el('span', { class: 'box', 'aria-hidden': 'true', text: st === 'done' ? '✓' : '' }),
+        el('span', { class: 'ovt' }, [
+          el('b', { text: (si + 1) + '. ' + s.title }),
+          el('span', { class: 'ovs', text: slots(si).map(function (f) { return SHORT[f.id]; }).join('・') })
+        ]),
+        el('span', { class: 'ovn', text: p.filled ? p.filled + ' / ' + p.total : p.total + '項目' })
+      ]);
+    });
+    var lead = '全' + t.total + '項目。計算に必要なのは' + reqTotal + '項目だけで、ほかは「分からない」で進めます。';
+    if (t.filled) lead += '今 ' + t.filled + '項目が入っています（返済期間35年は最初から入れてあります）。';
+    return el('div', { class: 'card overview' }, [
+      el('h2', { text: 'これから聞くこと' }),
+      el('p', { class: 'sub', text: lead })
+    ].concat(rows).concat([
+      el('p', { class: 'sub', style: 'margin:10px 0 0', text: '手元にあると早いもの：源泉徴収票、物件ページ（SUUMOなど。貼り付けると物件の数字がまとめて入ります）、銀行の事前審査や見積もり。' })
+    ]));
+  }
+
   function renderIntro() {
     app.appendChild(el('h1', { text: 'マンション購入 AI相談シート' }));
-    app.appendChild(el('p', { class: 'sub', text: 'v0.2（試作版）' }));
+    app.appendChild(el('p', { class: 'sub', text: 'v0.3（試作版）' }));
+    app.appendChild(el('p', { text: '5分ほどの質問に答えると、住宅ローンの返済額や負担率を計算し、ChatGPT や Claude にそのまま渡せる「相談用の文章」を作ります。' }));
+    app.appendChild(renderOverview());
     app.appendChild(el('div', { class: 'card' }, [
-      el('p', { text: '5分ほどの質問に答えると、あなたの条件で住宅ローンの返済額や負担率を計算し、ChatGPT や Claude にそのまま渡せる「相談用の文章」を作ります。' }),
+      el('h2', { text: '流れ' }),
       el('ol', { class: 'steps' }, [
-        el('li', { text: '世帯・家計・物件・お金の計画を入力（5つの画面）' }),
+        el('li', { text: '上の5つの区分に答える（チェックが埋まっていきます）' }),
         el('li', { text: '計算結果を確認' }),
         el('li', { text: '相談用の文章をコピーして、いつものAIに貼る' })
       ])
@@ -292,7 +391,12 @@
     var a = state.answers;
     var wrap = el('div', { class: 'field', id: 'f-' + f.id });
     var inputId = 'in-' + f.id;
-    wrap.appendChild(el('label', { class: 'q', for: inputId, text: f.label + (f.required ? '' : '') }));
+    var st0 = fieldStatus(f);
+    wrap.appendChild(el('label', { class: 'q', for: inputId }, [
+      el('span', { class: 'qbox ' + st0, id: 'qb-' + f.id, 'aria-hidden': 'true', text: st0 === 'done' ? '✓' : st0 === 'unknown' ? '?' : '' }),
+      el('span', { text: f.label }),
+      el('span', { class: 'tag' + (f.required ? ' need' : ''), text: f.required ? '必須' : f.type === 'chips' || f.type === 'textarea' ? '任意' : '任意・分からないでOK' })
+    ]));
     if (f.hint) wrap.appendChild(el('div', { class: 'hint', text: f.hint }));
 
     if (f.type === 'chips') {
@@ -300,9 +404,12 @@
       f.options.forEach(function (o) {
         var c = el('button', { type: 'button', class: 'chip', 'aria-pressed': String(a[f.id] === o[0]), text: o[1] });
         c.addEventListener('click', function () {
+          var first = a[f.id] === undefined || a[f.id] === '';
           a[f.id] = o[0];
           save();
           renderStep(state.step, true);
+          var b = document.getElementById('qb-' + f.id);
+          if (b && first) b.classList.add('pop');
         });
         chips.appendChild(c);
       });
@@ -314,6 +421,7 @@
       var ta = el('textarea', { id: inputId, placeholder: f.placeholder || '' });
       ta.value = a[f.id] || '';
       ta.addEventListener('input', function () { a[f.id] = ta.value; save(); renderChecklist(); });
+      ta.addEventListener('blur', function () { markField(f, !!ta.value.trim()); });
       wrap.appendChild(ta);
       return wrap;
     }
@@ -324,12 +432,15 @@
     input.addEventListener('input', function () {
       a[f.id] = normalizeNum(input.value);
       save();
-      renderChecklist();
       var e = document.getElementById('err-' + f.id);
       if (e) e.remove();
       if (f.id === 'ownFunds' || f.id === 'price' || f.id === 'renoCost') updateSuggest();
     });
-    input.addEventListener('blur', function () { input.value = a[f.id] !== undefined ? a[f.id] : ''; });
+    input.addEventListener('blur', function () {
+      input.value = a[f.id] !== undefined ? a[f.id] : '';
+      var v = a[f.id];
+      markField(f, v !== undefined && v !== '' && isFinite(Number(v)) && Number(v) >= 0);
+    });
     wrap.appendChild(el('div', { class: 'row' }, [input, el('span', { class: 'unit', text: f.unit || '' })]));
 
     if (f.suggest) {
@@ -342,6 +453,7 @@
         state.unknown[f.id] = cb.checked;
         input.disabled = cb.checked;
         save();
+        markField(f, true);
         renderChecklist();
       });
       wrap.appendChild(el('label', { class: 'unknown', for: 'unk-' + f.id }, [cb, el('span', { text: '分からない' })]));
@@ -369,8 +481,7 @@
     app.innerHTML = '';
     var s = STEPS[i];
     var a = state.answers;
-    app.appendChild(el('p', { class: 'sub', text: (i + 1) + ' / ' + STEPS.length }));
-    app.appendChild(el('div', { class: 'progress' }, [el('i', { style: 'width:' + Math.round((i + 1) / (STEPS.length + 1) * 100) + '%' })]));
+    app.appendChild(el('p', { class: 'sub', text: '画面 ' + (i + 1) + ' / ' + STEPS.length }));
     app.appendChild(el('h2', { text: s.title }));
     app.appendChild(el('p', { class: 'sub', text: s.lead }));
     if (s.importable) {
@@ -412,7 +523,12 @@
       }
     });
     if (firstErr) { firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    var p = tally().per[i];
+    var msg = '✓ ' + STEPS[i].title + '：' + p.total + '項目中 ' + p.filled + '項目を記入';
+    if (i + 1 < STEPS.length) msg += '\n次は ' + STEPS[i + 1].title + '（' + slots(i + 1).length + '項目）';
+    else msg = '✓ ' + tally().filled + '項目がそろいました。計算します';
     go(i + 1);
+    toast(msg, 1800);
   }
 
   function go(i) {
