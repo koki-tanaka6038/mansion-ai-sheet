@@ -124,7 +124,12 @@
       var was = b.className;
       b.className = 'qbox ' + st;
       b.textContent = st === 'done' ? '✓' : st === 'unknown' ? '?' : '';
-      if (st !== 'todo' && was.indexOf(st) < 0) { b.classList.add('pop'); }
+      if (st !== 'todo' && was.indexOf(st) < 0) {
+        b.classList.add('pop');
+        var plus = el('span', { class: 'fplus', 'aria-hidden': 'true', text: st === 'done' ? '+1' : '?' });
+        b.parentNode.insertBefore(plus, b.nextSibling);
+        setTimeout(function () { plus.remove(); }, 1000);
+      }
     }
     renderChecklist();
   }
@@ -243,22 +248,30 @@
     renderChecklist();
   }
 
-  // 下のバーの上に出す進み具合（スマホでは親指の届く位置）。タップでチェックリストを開く
+  // 画面上部に固定する進み具合。キーボードや指で隠れない位置に置く。タップでチェックリストを開く
+  var justDone = null;
   function renderProgress(t) {
-    var p = document.getElementById('prog');
+    var p = document.getElementById('top');
     if (!p) return;
     if (state.step < 0 || state.step >= STEPS.length) { p.hidden = true; return; }
     p.hidden = false;
     p.innerHTML = '';
     var gained = lastFilled !== null && t.filled > lastFilled ? t.filled - lastFilled : 0;
     lastFilled = t.filled;
-    p.appendChild(el('button', { type: 'button', class: 'progbtn', 'aria-expanded': String(!!state.sideOpen), onclick: toggleSheet }, [
-      el('span', { class: 'count' }, [el('b', { text: String(t.filled) }), document.createTextNode(' / ' + t.total + ' 入力済み')]),
-      gained ? el('span', { class: 'plus', 'aria-hidden': 'true', text: '+' + gained }) : null,
-      el('span', { class: 'left', text: t.reqLeft ? '必須あと' + t.reqLeft : '必須はそろいました' }),
-      el('span', { class: 'open', text: 'チェックリスト' })
+    var segs = STEPS.map(function (s, si) {
+      var q = t.per[si];
+      var cls = 'seg' + (si === state.step ? ' cur' : '') + (q.filled === q.total ? ' full' : '');
+      return el('span', { class: cls, title: s.title }, [el('i', { style: 'width:' + Math.round(q.filled / q.total * 100) + '%' })]);
+    });
+    p.appendChild(el('button', { type: 'button', class: 'topbtn', 'aria-expanded': String(!!state.sideOpen), onclick: toggleSheet }, [
+      el('span', { class: 'segs', 'aria-hidden': 'true' }, segs),
+      el('span', { class: 'toprow' }, [
+        el('span', { class: 'count' + (gained ? ' bump' : '') }, [el('b', { text: String(t.filled) }), document.createTextNode(' / ' + t.total + ' 入力済み')]),
+        gained ? el('span', { class: 'plus', 'aria-hidden': 'true', text: '+' + gained }) : null,
+        el('span', { class: 'left', text: t.reqLeft ? '必須あと' + t.reqLeft : '必須はそろいました' }),
+        el('span', { class: 'open', text: '一覧 ▾' })
+      ])
     ]));
-    p.appendChild(el('div', { class: 'progress' }, [el('i', { style: 'width:' + Math.round(t.filled / t.total * 100) + '%' })]));
   }
 
   function jumpTo(si, id) {
@@ -409,7 +422,12 @@
           save();
           renderStep(state.step, true);
           var b = document.getElementById('qb-' + f.id);
-          if (b && first) b.classList.add('pop');
+          if (b && first) {
+            b.classList.add('pop');
+            var plus = el('span', { class: 'fplus', 'aria-hidden': 'true', text: '+1' });
+            b.parentNode.insertBefore(plus, b.nextSibling);
+            setTimeout(function () { plus.remove(); }, 1000);
+          }
         });
         chips.appendChild(c);
       });
@@ -481,6 +499,13 @@
     app.innerHTML = '';
     var s = STEPS[i];
     var a = state.answers;
+    if (justDone) {
+      app.appendChild(el('div', { class: 'donebanner', role: 'status' }, [
+        el('span', { class: 'qbox done pop', 'aria-hidden': 'true', text: '✓' }),
+        el('span', { text: justDone.title + '：' + justDone.total + '項目中 ' + justDone.filled + '項目を記入しました' })
+      ]));
+      justDone = null;
+    }
     app.appendChild(el('p', { class: 'sub', text: '画面 ' + (i + 1) + ' / ' + STEPS.length }));
     app.appendChild(el('h2', { text: s.title }));
     app.appendChild(el('p', { class: 'sub', text: s.lead }));
@@ -524,11 +549,8 @@
     });
     if (firstErr) { firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     var p = tally().per[i];
-    var msg = '✓ ' + STEPS[i].title + '：' + p.total + '項目中 ' + p.filled + '項目を記入';
-    if (i + 1 < STEPS.length) msg += '\n次は ' + STEPS[i + 1].title + '（' + slots(i + 1).length + '項目）';
-    else msg = '✓ ' + tally().filled + '項目がそろいました。計算します';
+    justDone = { title: STEPS[i].title, filled: p.filled, total: p.total, si: i };
     go(i + 1);
-    toast(msg, 1800);
   }
 
   function go(i) {
