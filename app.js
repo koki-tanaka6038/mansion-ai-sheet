@@ -408,7 +408,7 @@
     wrap.appendChild(el('label', { class: 'q', for: inputId }, [
       el('span', { class: 'qbox ' + st0, id: 'qb-' + f.id, 'aria-hidden': 'true', text: st0 === 'done' ? '✓' : st0 === 'unknown' ? '?' : '' }),
       el('span', { text: f.label }),
-      el('span', { class: 'tag' + (f.required ? ' need' : ''), text: f.required ? '必須' : f.type === 'chips' || f.type === 'textarea' ? '任意' : '任意・分からないでOK' })
+      el('span', { class: 'tag' + (f.required ? ' need' : ''), text: f.required ? '必須' : f.type === 'chips' || f.type === 'textarea' ? '任意' : '任意・分からなくても進めます' })
     ]));
     if (f.hint) wrap.appendChild(el('div', { class: 'hint', text: f.hint }));
 
