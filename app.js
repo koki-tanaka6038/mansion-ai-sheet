@@ -448,7 +448,7 @@
   function renderIntro() {
     app.appendChild(el('h1', { text: 'マンション購入 AI相談シート' }));
     app.appendChild(el('p', { class: 'sub', text: 'v0.3.3（試作版）' }));
-    app.appendChild(el('p', { text: '5分ほどの質問に答えると、住宅ローンの返済額や負担率を計算し、ChatGPT や Claude にそのまま渡せる「相談用の文章」を作ります。' }));
+    app.appendChild(el('p', { text: '5分ほどの質問に答えると、住宅ローンの返済額や負担率を計算し、ChatGPT・Claude・Gemini にそのまま渡せる「相談用の文章」を作ります。' }));
     app.appendChild(renderOverview());
     app.appendChild(el('div', { class: 'card' }, [
       el('h2', { text: '流れ' }),
@@ -458,7 +458,7 @@
         el('li', { text: '相談用の文章をコピーして、いつものAIに貼る' })
       ])
     ]));
-    app.appendChild(el('div', { class: 'note', text: '入力した内容は、この端末のブラウザの中にだけ保存されます。どこにも送信しません。' }));
+    app.appendChild(el('div', { class: 'note', text: '入力した内容は、この端末のブラウザの中にだけ保存され、このシートからは送信しません。AIに相談するときは、相談用の文章があなたの選んだAIサービスに送られます（結果の画面で説明します）。' }));
     app.appendChild(el('p', { class: 'sub', text: 'このシートは計算と一般的な目安との比較をするもので、購入の可否や金融商品の選択を助言するものではありません。' }));
     var started = state.lastStep !== undefined;
     bar([el('button', { class: 'btn primary', text: started ? '続きから' : 'はじめる', onclick: function () { go(started && state.lastStep !== undefined ? state.lastStep : 0); } })]);
@@ -530,7 +530,7 @@
       save();
       var e = document.getElementById('err-' + f.id);
       if (e) e.remove();
-      if (f.id === 'ownFunds' || f.id === 'price' || f.id === 'renoCost') updateSuggest();
+      if (f.id === 'ownFunds' || f.id === 'price' || f.id === 'renoCost' || f.id === 'loan') updateSuggest();
     });
     input.addEventListener('blur', function () {
       if (f.id === 'loan') {
@@ -567,6 +567,9 @@
     var box = document.getElementById('suggest');
     if (!box) return;
     var s = suggestLoan();
+    var key = s === null ? '' : (state.loanManual ? 'm' : 'a') + s;
+    if (box.dataset.key === key) return;
+    box.dataset.key = key;
     box.innerHTML = '';
     if (s === null) return;
     var calcText = '物件＋リノベ＋諸費用（物件の約8.5%）−自己資金 ＝ ' + s.toLocaleString('ja-JP') + '万円';
@@ -581,7 +584,7 @@
       return;
     }
     box.appendChild(document.createTextNode('目安：' + calcText + ' '));
-    box.appendChild(el('button', { type: 'button', class: 'link', text: 'この額を入れる', onclick: function () {
+    box.appendChild(el('button', { type: 'button', class: 'link', text: 'この額を入れる', onmousedown: function (e) { e.preventDefault(); }, onclick: function () {
       state.loanManual = false;
       save();
       if (inLoan) inLoan.value = state.answers.loan;
@@ -738,8 +741,8 @@
         el('li', { text: '続けて質問すれば、あなたの条件をふまえて答えてくれます' })
       ]),
       pre,
-      el('div', { class: 'note', text: '貼り付けると、年収や借入額などの内容は貼り付け先のAIサービスに送られます。気になる場合は、数字を丸めるか、各サービスの設定（会話を学習に使うかどうか等）を確認してから使ってください。' }),
-      el('p', { class: 'sub', text: '下のボタンを押すと、相談用の文章をコピーしてからAIを開きます。入力欄に文章が入っていなければ、長押しして貼り付けてください。' }),
+      el('div', { class: 'note', text: 'AIに渡すと、年収や借入額などの内容はそのAIサービスに送られます。下の ChatGPT・Claude のボタンは、文章を入れた状態で開くため、押した時点でそのサービスに送られ、ブラウザの履歴にも残ります（ChatGPT はそのまま送信まで進むことがあります）。数字を丸めたい場合は、ボタンを使わずに下の「相談用の文章をコピー」でコピーし、AIに貼ってから直して送ってください。各サービスの設定（会話を学習に使うかどうか等）も確認してから使ってください。' }),
+      el('p', { class: 'sub', text: 'ボタンを押すと、相談用の文章をコピーしてからAIを開きます。入力欄に文章が入っていなければ、貼り付けてください（Gemini は貼り付けが必要です）。' }),
       el('div', { class: 'apps' }, AI_APPS.map(function (x) {
         return el('a', { href: x.url(text), target: '_blank', rel: 'noopener', text: x.name + ' で相談', onclick: function () { copy(text, pre, true); } });
       })),
@@ -781,7 +784,7 @@
       toast(done ? 'コピーしました' : '文章を選択しました。長押しでコピーしてください');
     }
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(function () { toast('コピーしました'); }, quiet ? function () {} : fallback);
+      navigator.clipboard.writeText(text).then(function () { toast('コピーしました'); }, quiet ? function () { toast('コピーできませんでした。「相談用の文章をコピー」を使ってください', 4000); } : fallback);
     } else {
       fallback();
     }
