@@ -65,7 +65,8 @@
     } else {
       net = net * man;
     }
-    var otherDebt = (num(a.otherDebt) || 0) * man;
+    // 住宅以外の借入は、毎月の返済額（円）で受け取る。古い保存データの年間返済額（万円）にも対応する
+    var otherDebt = num(a.otherDebtMonthly) !== null ? num(a.otherDebtMonthly) * 12 : (num(a.otherDebt) || 0) * man;
 
     var m = monthlyPayment(loan, rate, years);
     var annual = m * 12;
@@ -182,7 +183,7 @@
   function buildAiText(a, r, today) {
     var L = [];
     L.push('# マンション購入の相談：私の前提情報');
-    L.push('（マンション購入 AI相談シート v0.1 で作成：' + today + '）');
+    L.push('（作成日：' + today + '）');
     L.push('');
     L.push('この情報をもとに、私のマンション購入の資金計画について相談に乗ってください。');
     L.push('');
@@ -201,7 +202,9 @@
     L.push('- 子ども：' + val(a.kids, '人') + (Number(a.kids) > 0 ? '（末っ子 ' + val(a.youngestAge, '歳') + '）' : ''));
     L.push('- 世帯の額面年収：' + val(a.grossIncome, '万円'));
     L.push('- 世帯の手取り年収：' + val(a.netIncome, '万円'));
-    L.push('- 住宅以外の借入の年間返済額：' + val(a.otherDebt || 0, '万円'));
+    L.push(num(a.otherDebtMonthly) !== null || num(a.otherDebt) === null
+      ? '- 住宅以外の借入の毎月の返済額：' + val(a.otherDebtMonthly || 0, '円')
+      : '- 住宅以外の借入の年間返済額：' + val(a.otherDebt, '万円'));
     L.push('- 生活費（住居費を除く・月）：' + val(a.living, '万円'));
     L.push('- 預貯金・投資の合計：' + val(a.assets, '万円'));
     L.push('- 退職予定年齢：' + val(a.retireAge, '歳'));

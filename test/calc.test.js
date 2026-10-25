@@ -66,5 +66,17 @@ ok('AIに渡す文章に、主要な数字と気になっていることが入�
   assert.ok(t.includes('金利上昇が不安'));
   assert.ok(!t.includes('undefined') && !t.includes('NaN'));
 });
+ok('住宅以外の借入は毎月の額（円）で受け取り、年額にして負担率に足す', () => {
+  const b = Object.assign({}, a, { otherDebt: undefined, otherDebtMonthly: 30000 });
+  const rb = C.analyze(b);
+  assert.ok(Math.abs(rb.burdenGrossAll - (rb.annual + 360000) / 9000000) < 1e-12);
+  const t = C.buildAiText(b, rb, '2026-10-25');
+  assert.ok(t.includes('住宅以外の借入の毎月の返済額：30,000円'));
+});
+ok('AIに渡す文章に版の名前を入れない（作成日だけ）', () => {
+  const t = C.buildAiText(a, r, '2026-10-25');
+  assert.ok(!/v0\.|AI相談シート/.test(t));
+  assert.ok(t.includes('（作成日：2026-10-25）'));
+});
 console.log(`\n${pass} passed`);
 console.log('\n--- 出力例 ---\n' + C.buildAiText(a, r, '2026-10-20'));

@@ -17,7 +17,7 @@
         { id: 'youngestAge', label: '末っ子の年齢', type: 'number', unit: '歳', hint: '生まれる予定なら 0', parent: 'kids', when: function (a) { return Number(a.kids) > 0; } },
         { id: 'grossIncome', label: '世帯の年収（額面・税込）', type: 'number', unit: '万円', required: true, hint: '共働きなら2人の合計。源泉徴収票の「支払金額」' },
         { id: 'netIncome', label: '世帯の手取り年収', type: 'number', unit: '万円', unknown: true, hint: 'ボーナス込みで1年に口座へ入る額' },
-        { id: 'otherDebt', label: '住宅以外の借入の年間返済額', type: 'number', unit: '万円', hint: '車のローン・奨学金など。なければ 0' },
+        { id: 'otherDebtMonthly', label: '住宅以外の借入の毎月の返済額', type: 'number', unit: '円', hint: '車のローン・奨学金など、毎月返している額の合計。なければ 0' },
         { id: 'retireAge', label: '退職する予定の年齢', type: 'number', unit: '歳', unknown: true }
       ]
     },
@@ -72,7 +72,7 @@
   // チェックリストに出す短い名前
   var SHORT = {
     age: '年齢', spouse: '配偶者', spouseAge: '配偶者の年齢', kids: '子ども', youngestAge: '末っ子の年齢',
-    grossIncome: '額面年収', netIncome: '手取り年収', otherDebt: '他の借入', retireAge: '退職年齢',
+    grossIncome: '額面年収', netIncome: '手取り年収', otherDebtMonthly: '他の借入', retireAge: '退職年齢',
     living: '生活費', assets: '預貯金・投資', price: '物件価格', area: '専有面積', builtYear: '建築年',
     scale: '建物の規模', mgmtFee: '管理費', repairFee: '修繕積立金', renoCost: 'リノベ費用',
     ownFunds: '自己資金', loan: '借入額', years: '返済期間', rate: '金利', rateType: '金利タイプ', worry: '気になること'
@@ -86,11 +86,28 @@
   function load() {
     try {
       var s = JSON.parse(localStorage.getItem(STORE_KEY));
-      if (s && s.answers) return s;
+      if (s && s.answers) {
+        // v0.3.2 までの「年間返済額（万円）」を、毎月の額（円）に移す
+        if (s.answers.otherDebt !== undefined && s.answers.otherDebtMonthly === undefined) {
+          var od = Number(s.answers.otherDebt);
+          if (s.answers.otherDebt !== '' && isFinite(od)) s.answers.otherDebtMonthly = String(Math.round(od * 10000 / 12));
+          delete s.answers.otherDebt;
+        }
+        // 借入額を自分で入れていた人は、自動入力で上書きしない
+        if (s.loanManual === undefined) s.loanManual = s.answers.loan !== undefined && s.answers.loan !== '';
+        return s;
+      }
     } catch (e) { /* 保存できない環境でも動かす */ }
     return { step: -1, answers: { years: '35' }, unknown: {} };
   }
+  // 借入額は、自分で直すまで目安の額を自動で入れる
+  function autoLoan() {
+    if (state.loanManual) return;
+    var s = suggestLoan();
+    if (s !== null) state.answers.loan = String(s);
+  }
   function save() {
+    autoLoan();
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* 無視 */ }
   }
   function clearAll() {
@@ -430,7 +447,7 @@
 
   function renderIntro() {
     app.appendChild(el('h1', { text: 'マンション購入 AI相談シート' }));
-    app.appendChild(el('p', { class: 'sub', text: 'v0.3.2（試作版）' }));
+    app.appendChild(el('p', { class: 'sub', text: 'v0.3.3（試作版）' }));
     app.appendChild(el('p', { text: '5分ほどの質問に答えると、住宅ローンの返済額や負担率を計算し、ChatGPT や Claude にそのまま渡せる「相談用の文章」を作ります。' }));
     app.appendChild(renderOverview());
     app.appendChild(el('div', { class: 'card' }, [
@@ -509,12 +526,17 @@
     if (state.unknown[f.id]) input.disabled = true;
     input.addEventListener('input', function () {
       a[f.id] = normalizeNum(input.value);
+      if (f.id === 'loan') state.loanManual = true;
       save();
       var e = document.getElementById('err-' + f.id);
       if (e) e.remove();
       if (f.id === 'ownFunds' || f.id === 'price' || f.id === 'renoCost') updateSuggest();
     });
     input.addEventListener('blur', function () {
+      if (f.id === 'loan') {
+        if (a.loan === undefined || a.loan === '') { state.loanManual = false; save(); }
+        updateSuggest();
+      }
       input.value = a[f.id] !== undefined ? a[f.id] : '';
       var v = a[f.id];
       markField(f, v !== undefined && v !== '' && isFinite(Number(v)) && Number(v) >= 0);
@@ -547,12 +569,26 @@
     var s = suggestLoan();
     box.innerHTML = '';
     if (s === null) return;
-    box.appendChild(document.createTextNode('目安：物件＋リノベ＋諸費用（物件の約8.5%）−自己資金 ＝ ' + s.toLocaleString('ja-JP') + '万円 '));
+    var calcText = '物件＋リノベ＋諸費用（物件の約8.5%）−自己資金 ＝ ' + s.toLocaleString('ja-JP') + '万円';
+    var loanField = STEPS[3].fields.filter(function (f) { return f.id === 'loan'; })[0];
+    var inLoan = document.getElementById('in-loan');
+    if (!state.loanManual) {
+      box.appendChild(document.createTextNode('自動で入れています：' + calcText + '。銀行の見積もりなどで額が決まっていれば、直してください。'));
+      if (inLoan && document.activeElement !== inLoan && inLoan.value !== state.answers.loan) {
+        inLoan.value = state.answers.loan;
+        markField(loanField, true);
+      }
+      return;
+    }
+    box.appendChild(document.createTextNode('目安：' + calcText + ' '));
     box.appendChild(el('button', { type: 'button', class: 'link', text: 'この額を入れる', onclick: function () {
-      state.answers.loan = String(s);
+      state.loanManual = false;
       save();
-      renderChecklist();
-      document.getElementById('in-loan').value = s;
+      if (inLoan) inLoan.value = state.answers.loan;
+      var e = document.getElementById('err-loan');
+      if (e) e.remove();
+      markField(loanField, true);
+      updateSuggest();
     } }));
   }
 
@@ -698,16 +734,16 @@
       el('h2', { text: 'AIに相談する' }),
       el('ol', { class: 'steps' }, [
         el('li', { text: '下の「相談用の文章をコピー」を押す' }),
-        el('li', { text: 'ChatGPT や Claude を開いて、新しい会話に貼り付けて送る' }),
+        el('li', { text: 'ChatGPT・Claude・Gemini を開いて、新しい会話に貼り付けて送る' }),
         el('li', { text: '続けて質問すれば、あなたの条件をふまえて答えてくれます' })
       ]),
       pre,
       el('div', { class: 'note', text: '貼り付けると、年収や借入額などの内容は貼り付け先のAIサービスに送られます。気になる場合は、数字を丸めるか、各サービスの設定（会話を学習に使うかどうか等）を確認してから使ってください。' }),
-      el('div', { class: 'apps' }, [
-        el('a', { href: 'https://chatgpt.com/', target: '_blank', rel: 'noopener', text: 'ChatGPT を開く' }),
-        el('a', { href: 'https://claude.ai/new', target: '_blank', rel: 'noopener', text: 'Claude を開く' })
-      ]),
-      el('p', { class: 'sub', style: 'margin-top:10px', text: 'ヒント：ChatGPT や Claude の「プロジェクト」の指示欄に貼っておくと、次からは説明しなくても前提をふまえて答えてくれます。' })
+      el('p', { class: 'sub', text: '下のボタンを押すと、相談用の文章をコピーしてからAIを開きます。入力欄に文章が入っていなければ、長押しして貼り付けてください。' }),
+      el('div', { class: 'apps' }, AI_APPS.map(function (x) {
+        return el('a', { href: x.url(text), target: '_blank', rel: 'noopener', text: x.name + ' で相談', onclick: function () { copy(text, pre, true); } });
+      })),
+      el('p', { class: 'sub', style: 'margin-top:10px', text: 'ヒント：ChatGPT や Claude の「プロジェクト」、Gemini の「Gem」の指示欄に貼っておくと、次からは説明しなくても前提をふまえて答えてくれます。' })
     ]));
 
     app.appendChild(el('footer', {}, [
@@ -726,7 +762,14 @@
     ]);
   }
 
-  function copy(text, pre) {
+  // ChatGPT と Claude は、URL の q に文章を入れると入力欄に入った状態で開くことがある（公式の説明はない。入らなくてもコピー済みなので貼れる）
+  var AI_APPS = [
+    { name: 'ChatGPT', url: function (t) { return 'https://chatgpt.com/?q=' + encodeURIComponent(t); } },
+    { name: 'Claude', url: function (t) { return 'https://claude.ai/new?q=' + encodeURIComponent(t); } },
+    { name: 'Gemini', url: function () { return 'https://gemini.google.com/app'; } }
+  ];
+
+  function copy(text, pre, quiet) {
     function fallback() {
       var range = document.createRange();
       range.selectNodeContents(pre);
@@ -738,7 +781,7 @@
       toast(done ? 'コピーしました' : '文章を選択しました。長押しでコピーしてください');
     }
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(function () { toast('コピーしました'); }, fallback);
+      navigator.clipboard.writeText(text).then(function () { toast('コピーしました'); }, quiet ? function () {} : fallback);
     } else {
       fallback();
     }
@@ -752,5 +795,7 @@
     else renderResult();
   }
 
+  autoLoan();
+  save();
   render();
 })();
