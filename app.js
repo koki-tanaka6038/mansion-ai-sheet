@@ -35,12 +35,16 @@
       importable: true,
       fields: [
         { id: 'price', label: '物件価格', type: 'number', unit: '万円', required: true },
-        { id: 'area', label: '専有面積', type: 'number', unit: '㎡', unknown: true, step: '0.01', hint: '物件ページや販売図面の「専有面積」。例：70.12。間取り図の面積は合計しなくて大丈夫です' },
+        { id: 'area', label: '専有面積', type: 'number', unit: '㎡', unknown: true, step: '0.01', hint: '例：70.12',
+          where: ['物件ページの「物件概要」や販売図面に、「専有面積　70.12㎡（壁芯）」のように書いてあります。', '「壁芯」「内法」のどちらでも、書いてある数字をそのまま入れてください。バルコニー面積や間取り図の各部屋の広さは足しません。'] },
         { id: 'builtYear', label: '建築年（西暦）', type: 'number', unit: '年', unknown: true, hint: '例：1998' },
         { id: 'scale', label: '建物の規模', type: 'chips', hint: '修繕積立金を国のガイドラインと比べるのに使います',
+          where: ['階数は物件概要の「構造・階建て」の行に書いてあります。例：「RC14階建」なら20階未満です。', '延床面積は「延床面積」「建物延べ面積」などの行に書かれていることがあります。見つからなければ「分からない」を選んでください。修繕積立金を国の目安と比べる表示が出ないだけで、ほかの計算には使いません。'],
           options: [['s1', '20階未満・延床5,000㎡未満'], ['s2', '20階未満・延床5,000〜1万㎡'], ['s3', '20階未満・延床1万〜2万㎡'], ['s4', '20階未満・延床2万㎡以上'], ['tower', '20階以上'], ['unknown', '分からない']] },
-        { id: 'mgmtFee', label: '管理費（月額）', type: 'number', unit: '円', unknown: true },
-        { id: 'repairFee', label: '修繕積立金（月額）', type: 'number', unit: '円', unknown: true },
+        { id: 'mgmtFee', label: '管理費（月額）', type: 'number', unit: '円', unknown: true,
+          where: ['物件概要の「管理費」の行です（「管理費等」と書かれていることもあります）。', '例：「管理費　1万2000円／月」なら 12000 と入れます。'] },
+        { id: 'repairFee', label: '修繕積立金（月額）', type: 'number', unit: '円', unknown: true,
+          where: ['物件概要の「修繕積立金」の行です。例：「修繕積立金　1万5600円／月」なら 15600 と入れます。', '入居時に一度だけ払う「修繕積立基金」「修繕一時金」とは別のお金です。毎月の額を入れてください。'] },
         { id: 'renoCost', label: 'リノベーション費用', type: 'number', unit: '万円', hint: 'しないなら 0。見積もり前なら想定額' }
       ]
     },
@@ -292,51 +296,87 @@
   var IMPORT_LABEL = { price: ['物件価格', '万円'], area: ['専有面積', '㎡'], builtYear: ['建築年', '年'],
     mgmtFee: ['管理費', '円'], repairFee: ['修繕積立金', '円'], scale: ['建物の規模', ''] };
 
-  function renderImport() {
+  function isImported(id) {
+    var v = state.importedVals;
+    return !!v && v[id] !== undefined && String(state.answers[id]) === String(v[id]) && !state.unknown[id];
+  }
+
+  // onIntro：最初の画面の「検討中の物件」の行の下に出す。読み込んだ結果はその場（行のすぐ下）に出す
+  function renderImport(onIntro) {
     var ta = el('textarea', { id: 'importText', placeholder: '例：\n価格　5980万円\n専有面積　70.12m2（壁芯）\n完成時期（築年月）　1998年3月\n管理費　1万2000円／月\n修繕積立金　1万5600円／月' });
     var msg = el('div', { class: 'hint', id: 'importMsg', role: 'status' });
-    var det = el('details', { class: 'card import' }, [
-      el('summary', { text: '物件ページの文章から読み込む（任意）' }),
+    var det = el('details', { class: 'card import' + (onIntro ? ' intro' : '') }, [
+      el('summary', { text: onIntro ? '物件ページを貼ってまとめて入力（任意）' : '物件ページの文章から読み込む（任意）' }),
       el('p', { class: 'sub', text: 'SUUMO などの物件ページの「物件概要」の部分をコピーして、下に貼り付けてください。価格・専有面積・築年・管理費・修繕積立金を読み取って入力します。' }),
       el('p', { class: 'sub', text: 'URL だけでは読み込めません（このシートは物件サイトに接続しないため）。コピーは、物件概要の文字を長押し →「すべてを選択」または範囲を広げて「コピー」。' }),
       ta,
       el('div', { class: 'row', style: 'margin-top:8px' }, [
-        el('button', { type: 'button', class: 'btn', text: '読み込む', onclick: function () { doImport(ta.value); } })
+        el('button', { type: 'button', class: 'btn', text: '読み込む', onclick: function () { ta.blur(); doImport(ta.value, onIntro); } })
       ]),
       msg
     ]);
-    if (state.importOpen) det.open = true;
-    det.addEventListener('toggle', function () { state.importOpen = det.open; save(); });
+    var key = onIntro ? 'importOpenIntro' : 'importOpen';
+    if (state[key]) det.open = true;
+    det.addEventListener('toggle', function () { state[key] = det.open; save(); });
     return det;
   }
 
-  function doImport(text) {
+  function importedParts(keys) {
+    return keys.map(function (k) {
+      var L = IMPORT_LABEL[k], v = state.answers[k];
+      if (k === 'scale') return L[0] + '：20階以上';
+      return L[0] + ' ' + (k === 'builtYear' ? String(v) : Number(v).toLocaleString('ja-JP')) + L[1];
+    });
+  }
+
+  function importedNoteText() {
+    var still = Object.keys(IMPORT_LABEL).filter(isImported);
+    return still.length ? '物件ページから読み込んだ値：' + importedParts(still).join('、') + '。違っていたら直してください。' : '';
+  }
+  function refreshImported() {
+    var note = document.getElementById('importedNote');
+    if (note) { note.textContent = importedNoteText(); note.hidden = !note.textContent; }
+    Object.keys(IMPORT_LABEL).forEach(function (k) {
+      var q = document.querySelector('#f-' + k + ' label.q');
+      if (!q) return;
+      var tag = q.querySelector('.tag.imp');
+      if (isImported(k) && !tag) q.insertBefore(el('span', { class: 'tag imp', text: '物件ページから' }), q.querySelector('.tag:not(.imp)'));
+      else if (!isImported(k) && tag) tag.remove();
+    });
+  }
+
+  var introImport = null; // 最初の画面で読み込んだ直後に、行の下に出す結果
+  function doImport(text, onIntro) {
     var r = Parse.parseListing(text);
     var keys = Object.keys(r);
     if (!keys.length) {
       setImportMsg('読み取れる項目が見つかりませんでした。「価格」「専有面積」などの見出しを含めてコピーしてください。');
       return;
     }
+    state.importedVals = state.importedVals || {};
     keys.forEach(function (k) {
       state.answers[k] = String(r[k]);
       state.unknown[k] = false;
+      state.importedVals[k] = String(r[k]);
     });
     state.imported = keys;
     state.importOpen = false;
+    state.importOpenIntro = false;
     save();
+    if (onIntro) {
+      var missed = ['price', 'area', 'builtYear', 'mgmtFee', 'repairFee'].filter(function (k) { return keys.indexOf(k) < 0; });
+      introImport = { keys: keys, missed: missed };
+      app.innerHTML = '';
+      renderIntro();
+      var res = document.getElementById('introImportMsg');
+      if (res) res.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     renderStep(state.step, true);
     keys.forEach(function (k) { var b = document.getElementById('f-' + k); if (b) b.classList.add('flash'); });
-    var parts = keys.map(function (k) {
-      var L = IMPORT_LABEL[k];
-      if (k === 'scale') return L[0] + '：20階以上';
-      var v = k === 'builtYear' ? String(r[k]) : Number(r[k]).toLocaleString('ja-JP');
-      return L[0] + ' ' + v + L[1];
-    });
     toast(keys.length + '項目を読み込みました');
     var first = document.getElementById('f-' + keys[0]);
     if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    var note = document.getElementById('importedNote');
-    if (note) note.textContent = '読み込んだ値：' + parts.join('、') + '。違っていたら直してください。';
   }
 
   function setImportMsg(t) { var m = document.getElementById('importMsg'); if (m) m.textContent = t; }
@@ -349,10 +389,11 @@
     var t = tally();
     var reqTotal = 0;
     STEPS.forEach(function (s) { s.fields.forEach(function (f) { if (f.required) reqTotal++; }); });
-    var rows = STEPS.map(function (s, si) {
+    var rows = [];
+    STEPS.forEach(function (s, si) {
       var p = t.per[si];
       var st = p.filled === p.total ? 'done' : p.filled ? 'some' : 'todo';
-      return el('button', { type: 'button', class: 'ovrow ' + st, onclick: function () { go(si); } }, [
+      var row = el('button', { type: 'button', class: 'ovrow ' + st, onclick: function () { go(si); } }, [
         el('span', { class: 'box', 'aria-hidden': 'true', text: st === 'done' ? '✓' : '' }),
         el('span', { class: 'ovt' }, [
           el('b', { text: (si + 1) + '. ' + s.title }),
@@ -360,6 +401,22 @@
         ]),
         el('span', { class: 'ovn', text: p.filled ? p.filled + ' / ' + p.total : p.total + '項目' })
       ]);
+      rows.push(row);
+      if (!s.importable) return;
+      if (introImport) {
+        row.classList.add('flash');
+        var lines = [el('p', {}, [el('b', { text: introImport.keys.length + '項目を入力しました' }),
+          document.createTextNode('：' + importedParts(introImport.keys).join('、') + '。違っていたら「' + (si + 1) + '. ' + s.title + '」で直してください。')])];
+        if (introImport.missed.length) lines.push(el('p', { class: 'sub', text: '読み取れなかった項目：' + introImport.missed.map(function (k) { return IMPORT_LABEL[k][0]; }).join('・') + '（画面で入力するか「分からない」にできます）' }));
+        lines.push(el('div', { class: 'row' }, [
+          el('button', { type: 'button', class: 'link', text: '物件の画面で確かめる', onclick: function () { go(si); } }),
+          el('button', { type: 'button', class: 'link', text: '別の文章を貼り直す', onclick: function () { state.importOpenIntro = true; save(); app.innerHTML = ''; renderIntro(); var t = document.getElementById('importText'); if (t) t.scrollIntoView({ block: 'center' }); } })
+        ]));
+        rows.push(el('div', { class: 'imported-now', id: 'introImportMsg', role: 'status' }, lines));
+        introImport = null;
+      } else {
+        rows.push(renderImport(true));
+      }
     });
     var lead = '全' + t.total + '項目。計算に必要なのは' + reqTotal + '項目だけで、ほかは「分からない」で進めます。';
     if (t.filled) lead += '今 ' + t.filled + '項目が入っています（返済期間35年は最初から入れてあります）。';
@@ -367,13 +424,13 @@
       el('h2', { text: 'これから聞くこと' }),
       el('p', { class: 'sub', text: lead })
     ].concat(rows).concat([
-      el('p', { class: 'sub', style: 'margin:10px 0 0', text: '手元にあると早いもの：源泉徴収票、物件ページ（SUUMOなど。貼り付けると物件の数字がまとめて入ります）、銀行の事前審査や見積もり。' })
+      el('p', { class: 'sub', style: 'margin:10px 0 0', text: '手元にあると早いもの：源泉徴収票、物件ページ（SUUMOなど。上の「物件ページを貼ってまとめて入力」から物件の数字がまとめて入ります）、銀行の事前審査や見積もり。' })
     ]));
   }
 
   function renderIntro() {
     app.appendChild(el('h1', { text: 'マンション購入 AI相談シート' }));
-    app.appendChild(el('p', { class: 'sub', text: 'v0.3（試作版）' }));
+    app.appendChild(el('p', { class: 'sub', text: 'v0.3.2（試作版）' }));
     app.appendChild(el('p', { text: '5分ほどの質問に答えると、住宅ローンの返済額や負担率を計算し、ChatGPT や Claude にそのまま渡せる「相談用の文章」を作ります。' }));
     app.appendChild(renderOverview());
     app.appendChild(el('div', { class: 'card' }, [
@@ -408,9 +465,12 @@
     wrap.appendChild(el('label', { class: 'q', for: inputId }, [
       el('span', { class: 'qbox ' + st0, id: 'qb-' + f.id, 'aria-hidden': 'true', text: st0 === 'done' ? '✓' : st0 === 'unknown' ? '?' : '' }),
       el('span', { text: f.label }),
+      isImported(f.id) ? el('span', { class: 'tag imp', text: '物件ページから' }) : null,
       el('span', { class: 'tag' + (f.required ? ' need' : ''), text: f.required ? '必須' : f.type === 'chips' || f.type === 'textarea' ? '任意' : '任意・分からなくても進めます' })
     ]));
     if (f.hint) wrap.appendChild(el('div', { class: 'hint', text: f.hint }));
+    if (f.where) wrap.appendChild(el('details', { class: 'where' }, [el('summary', { text: 'どこに書いてある？' })]
+      .concat(f.where.map(function (t) { return el('p', { text: t }); }))));
 
     if (f.type === 'chips') {
       var chips = el('div', { class: 'chips', role: 'group', 'aria-label': f.label });
@@ -458,6 +518,7 @@
       input.value = a[f.id] !== undefined ? a[f.id] : '';
       var v = a[f.id];
       markField(f, v !== undefined && v !== '' && isFinite(Number(v)) && Number(v) >= 0);
+      refreshImported();
     });
     wrap.appendChild(el('div', { class: 'row' }, [input, el('span', { class: 'unit', text: f.unit || '' })]));
 
@@ -471,6 +532,7 @@
         state.unknown[f.id] = cb.checked;
         input.disabled = cb.checked;
         save();
+        refreshImported();
         markField(f, true);
         renderChecklist();
       });
@@ -511,7 +573,11 @@
     app.appendChild(el('p', { class: 'sub', text: s.lead }));
     if (s.importable) {
       app.appendChild(renderImport());
-      if (state.imported && state.imported.length) app.appendChild(el('div', { class: 'hint', id: 'importedNote' }));
+      if (state.importedVals) {
+        var note = el('div', { class: 'hint', id: 'importedNote', text: importedNoteText() });
+        note.hidden = !note.textContent;
+        app.appendChild(note);
+      }
     }
     var card = el('div', { class: 'card' });
     s.fields.forEach(function (f) {

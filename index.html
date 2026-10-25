@@ -134,6 +134,19 @@
   details.import summary::-webkit-details-marker { display: none; }
   details.import summary::before { content: "▸"; color: var(--accent); }
   details.import[open] summary::before { content: "▾"; }
+  details.import.intro { margin: 8px 0 0 24px; padding: 4px 12px; }
+  details.import.intro summary { font-size: .9rem; }
+  .ovrow.flash { animation: flash 1.2s ease-out; }
+  .imported-now { margin: 8px 0 0 24px; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--soft); border-radius: 0 10px 10px 0; font-size: .9rem; }
+  .imported-now p { margin: 0 0 4px; }
+  .tag.imp { color: var(--accent); border-color: var(--accent); }
+  /* 難しい項目の「どこに書いてある？」 */
+  details.where { margin: 0 0 6px; font-size: .85rem; color: var(--sub); }
+  details.where summary { color: var(--accent); cursor: pointer; min-height: 44px; display: flex; align-items: center; list-style: none; }
+  details.where summary::-webkit-details-marker { display: none; }
+  details.where summary::before { content: "▸"; margin-right: 6px; }
+  details.where[open] summary::before { content: "▾"; }
+  details.where p { margin: 0 0 6px; padding-left: 14px; }
   .unknown { min-height: 44px; }
   .unknown input { width: 22px; height: 22px; }
   button.link { min-height: 44px; }
