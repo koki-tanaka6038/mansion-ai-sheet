@@ -78,5 +78,62 @@ ok('AIに渡す文章に版の名前を入れない（作成日だけ）', () =>
   assert.ok(!/v0\.|AI相談シート/.test(t));
   assert.ok(t.includes('（作成日：2026-10-25）'));
 });
+
+// ---- v0.4：自動・初期値・未回答の出所を相談文に出す ----
+const v4 = { age: 35, spouse: 'none', kids: '0', grossIncome: 800, price: 5000, ownFunds: '', loan: 5425, years: 35, rate: 0.9,
+  otherDebtHas: 'none', loanAuto: true, yearsDefault: true };
+const r4 = C.analyze(v4);
+const t4 = C.buildAiText(v4, r4, '2026-10-26');
+ok('借入額が自動のときは過不足を出さず、相談文に自動・未修正と書く', () => {
+  assert.strictEqual(r4.fundingGap, null);
+  assert.ok(t4.includes('資金の過不足：借入額をシートが自動で合わせた'));
+  assert.ok(t4.includes('借入額：5,425万円（シートの自動計算'));
+  assert.ok(!t4.includes('NaN') && !t4.includes('undefined'));
+});
+ok('返済期間が初期値のままなら、そう書く', () => {
+  assert.ok(t4.includes('返済期間：35年（シートの初期値のまま'));
+  const t = C.buildAiText(Object.assign({}, v4, { yearsDefault: false }), r4, '2026-10-26');
+  assert.ok(t.includes('返済期間：35年\n'));
+});
+ok('「なし」は本人回答、空欄は未回答と分けて書く', () => {
+  assert.ok(t4.includes('住宅以外の借入：なし（本人回答）'));
+  assert.ok(t4.includes('リノベーション費用：未回答。計算では0円とした'));
+  assert.ok(t4.includes('自己資金として出す額：未入力（計算では0円とした）'));
+  const t = C.buildAiText(Object.assign({}, v4, { otherDebtHas: undefined, renoHas: 'none' }), r4, '2026-10-26');
+  assert.ok(t.includes('住宅以外の借入：未回答。計算では0円とした'));
+  assert.ok(t.includes('リノベーション：しない（本人回答）'));
+});
+ok('「なし」を選んだら、残っている金額は負担率に足さない', () => {
+  const b = Object.assign({}, v4, { otherDebtMonthly: 30000 });
+  assert.strictEqual(C.analyze(b).burdenGrossAll, C.analyze(v4).burdenGross);
+  const c = Object.assign({}, b, { otherDebtHas: 'yes' });
+  assert.ok(Math.abs(C.analyze(c).burdenGrossAll - (C.analyze(c).annual + 360000) / 8000000) < 1e-12);
+});
+ok('金利が分からないときは、例の3通りで計算し、出典と「勧めるものではない」を書く', () => {
+  const a = Object.assign({}, v4, { rate: '' });
+  const ex = C.analyzeExamples(a);
+  assert.deepStrictEqual(ex.map(e => e.rate), [1.0, 1.5, 2.0]);
+  assert.strictEqual(Math.round(ex[0].r.monthly), Math.round(C.monthlyPayment(54250000, 1.0, 35)));
+  const t = C.buildAiText(a, ex[0].r, '2026-10-26', ex);
+  assert.ok(t.includes('金利：本人は未入力（分からない）'));
+  assert.ok(t.includes('どれかを勧めるものではない'));
+  assert.ok(t.includes('住宅金融支援機構'));
+  assert.ok(t.includes('例3（金利 年2.0%）：毎月の返済額 ' + Math.round(ex[2].r.monthly).toLocaleString('ja-JP') + '円'));
+  assert.ok(!t.includes('金利が1%上がった場合') && !t.includes('NaN') && !t.includes('undefined'));
+});
+ok('退職年齢が未定なら、65歳と仮定したと書く', () => {
+  const t = C.buildAiText(Object.assign({}, v4, { retirePick: 'undecided' }), r4, '2026-10-26');
+  assert.ok(t.includes('退職予定年齢：未定（計算では65歳と仮定）'));
+});
+ok('管理費・修繕積立金が未入力なら、0円としたことを仮定に書く', () => {
+  assert.ok(r4.assumptions.some(s => s.includes('管理費・修繕積立金は未入力（または分からない）のため0円')));
+  assert.ok(t4.includes('管理費・修繕積立金は未入力（または分からない）のため0円'));
+  const one = C.analyze(Object.assign({}, v4, { mgmtFee: 12000 }));
+  assert.ok(one.assumptions.some(s => s.startsWith('修繕積立金は未入力')));
+  assert.ok(!r.assumptions.some(s => s.includes('管理費')));
+});
+ok('子ども「3人以上」は、相談文でも3人以上と書く', () => {
+  assert.ok(C.buildAiText(Object.assign({}, v4, { kids: '3' }), r4, '2026-10-26').includes('子ども：3人以上'));
+});
 console.log(`\n${pass} passed`);
 console.log('\n--- 出力例 ---\n' + C.buildAiText(a, r, '2026-10-20'));
