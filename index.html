@@ -204,6 +204,27 @@
   .gain { font-size: .88rem; background: var(--soft); border-radius: 10px; padding: 8px 12px; }
   table.ex th.n { text-align: right; }
   p.pr { margin: 0 0 6px; }
+  /* v0.5：プロローグと着地画面 */
+  body.pro-on { background: var(--soft); }
+  .prologue { position: relative; min-height: calc(100dvh - 120px); display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; cursor: pointer; user-select: none; -webkit-user-select: none; padding: 24px 8px 15vh; }
+  .pdots { display: flex; gap: 8px; position: absolute; top: 12px; left: 50%; transform: translateX(-50%); }
+  .pdots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+  .pdots i.on { background: var(--accent); }
+  .pline { font-size: 1.25rem; font-weight: 600; line-height: 1.8; white-space: pre-line; margin: 0; opacity: 0; transform: translateY(8px);
+    transition: opacity .6s ease-out, transform .6s ease-out; }
+  .pline.in { opacity: 1; transform: none; }
+  .pline.out { opacity: 0; transform: none; transition: opacity .4s ease-in; }
+  .pnav { position: absolute; bottom: 4px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 8px; }
+  .pnav .link { font-size: .9rem; color: var(--sub); text-decoration: none; padding: 4px 12px; }
+  .ppaused { position: absolute; top: 30px; left: 0; right: 0; font-size: .8rem; color: var(--sub); margin: 0; }
+  .prologue:focus { outline: none; }
+  .bar .pskip { order: -1; }
+  .bar .pbtn, .bar .pskip { flex: 1; }
+  .landing.fadein { animation: slidein .5s ease-out; }
+  .appname { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 0; font-size: .85rem; color: var(--sub); }
+  .appname b { color: var(--text); font-size: .95rem; }
+  .hero h1 { font-size: 1.25rem; margin: 0 0 10px; }
 </style>
 </head>
 <body>

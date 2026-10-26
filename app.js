@@ -1,4 +1,4 @@
-// マンション購入 AI相談シート v0.4 — 画面
+// マンション購入 AI相談シート v0.5 — 画面
 // 回答はこの端末のブラウザ（localStorage）にだけ保存する。外に出るのは、結果の画面で本人がAIのボタンを押すか相談文をコピーして貼ったときだけ。
 // v0.4：最初の8問（第1段）→ 目安の画面 → くわしく入れる（第2段・任意）→ 気になること → 結果、の2段構え
 (function () {
@@ -13,7 +13,7 @@
     {
       stage: 1,
       title: 'あなたの世帯と収入',
-      lead: '最初は選ぶだけの質問です。',
+      lead: '最初は選ぶだけの質問です。答えが必要なのは、年齢・年収・物件価格・金利の4つです（金利は「分からない」でも進めます）。',
       fields: [
         { id: 'spouse', label: '配偶者・パートナー', type: 'chips', options: [['none', 'なし'], ['yes', 'あり']] },
         { id: 'kids', label: '子どもの人数', type: 'chips', options: [['0', '0人'], ['1', '1人'], ['2', '2人'], ['3', '3人以上']] },
@@ -176,9 +176,10 @@
   }
   function clearAll() {
     try { localStorage.removeItem(STORE_KEY); } catch (e) { /* 無視 */ }
-    var tester = state.testerOn;
+    var tester = state.testerOn, seen = state.prologueSeen;
     state = fresh();
     if (tester) state.testerOn = true;
+    if (seen) state.prologueSeen = true;
     render();
   }
 
@@ -527,7 +528,15 @@
     if (isStep(i) && STEPS[i].stage === 2) log.detail = true;
     screenStart = Date.now();
   }
+  // ← → キーでプロローグを前後に送る
+  document.addEventListener('keydown', function (e) {
+    if (!pro || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); proGo(pro.i + 1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); proGo(pro.i - 1); }
+  });
   document.addEventListener('visibilitychange', function () {
+    // 別のアプリに切り替えている間は、プロローグを止める
+    if (document.hidden && pro && !pro.paused) proPause(true);
     if (!state.testerOn) return;
     if (document.hidden) { logLeave(); save(); } else screenStart = Date.now();
   });
@@ -544,6 +553,7 @@
     var L = ['テスター用メモ（入力した数字や選んだ内容は入っていません）'];
     L.push('最後に開いた画面：' + (log.last ? screenName(log.last) : '―'));
     L.push('目安の画面まで進んだ：' + (log.card ? 'はい' : 'いいえ'));
+    L.push('プロローグ：' + (log.prologue || '―'));
     L.push('「くわしく入れる」の画面を開いた：' + (log.detail ? 'はい' : 'いいえ'));
     L.push('画面ごとの時間：' + (log.order.length ? log.order.map(function (k) { return screenName(k) + ' ' + (log.sec[k] || 0) + '秒'; }).join('、') : '―'));
     L.push('空欄の項目：' + (blank.length ? blank.join('、') : 'なし'));
@@ -590,7 +600,7 @@
         el('span', { class: 'ovn', text: p.filled ? p.filled + ' / ' + p.total : p.total + '項目' })
       ]));
     });
-    var det = el('details', { class: 'card all' }, [el('summary', { text: '全部の項目を見る（' + t.total + '項目。借入額・返済期間は自動）' })].concat(rows).concat([
+    var det = el('details', { class: 'card all' }, [el('summary', { text: '全部の項目を見る' })].concat(rows).concat([
       el('p', { class: 'sub', style: 'margin:10px 0 0', text: '手元にあると早いもの：源泉徴収票、物件ページ（SUUMOなど。物件の画面で文章を貼ると、数字がまとめて入ります）、銀行の事前審査や見積もり。' })
     ]));
     if (state.overviewOpen) det.open = true;
@@ -598,12 +608,124 @@
     return det;
   }
 
-  // スタート画面：最初に何が出るか・どこまで答えればよいかを先に見せて、始めるハードルを下げる
+  // ---- プロローグ（初めて開いた人にだけ、短い文を1つずつ浮かべては消す） ----
+  // 設計：research/2026-10-27_プロローグ_スタート画面設計案.md。表示時間は「字数÷4秒＋1秒」（字幕の上限4字/秒より長く）。\n は改行の位置で、字数には数えない
+  var PROLOGUE = [
+    'マンションを買う前に、\nお金のことを整理しませんか。',
+    '気になるのは、\n毎月いくら返すことになるか。',
+    '8つの質問に答えると、\nその目安が出ます。',
+    '細かい数字は、\n目安を見たあとで大丈夫です。',
+    '入力はこの端末に保存。\nAIに渡すかは、あなたが決めます。'
+  ];
+  var FADE_OUT_MS = 400;
+  var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var pro = null; // 再生中のプロローグの状態（保存しない）
+  var landingFade = false;
+
+  function showPrologue() { return !state.prologueSeen && state.lastStep === undefined; }
+
+  function renderPrologue() {
+    document.body.classList.add('pro-on');
+    pro = { i: 0, paused: false, timer: null, started: Date.now() };
+    var line = el('p', { class: 'pline', id: 'pline', 'aria-live': 'polite' });
+    var dots = el('div', { class: 'pdots', 'aria-hidden': 'true' }, PROLOGUE.map(function () { return el('i'); }));
+    var paused = el('p', { class: 'ppaused', id: 'ppaused', hidden: 'hidden', text: '一時停止中' });
+    // タップの位置だけでなく、ボタンと ← → キーでも前後に送れるようにする（キーボード・読み上げの人のため）
+    var nav = el('div', { class: 'pnav' }, [
+      el('button', { type: 'button', class: 'link', text: '‹ 前へ', onclick: function (e) { e.stopPropagation(); proGo(pro.i - 1); } }),
+      el('button', { type: 'button', class: 'link', text: '次へ ›', onclick: function (e) { e.stopPropagation(); proGo(pro.i + 1); } })
+    ]);
+    var stage = el('div', { class: 'prologue', role: 'region', 'aria-label': 'はじめに', tabindex: '-1' }, [dots, paused, line, nav]);
+    // 右の3分の2で次の文、左の3分の1で前の文
+    stage.addEventListener('click', function (e) {
+      var r = stage.getBoundingClientRect();
+      if (e.clientX - r.left < r.width / 3) proGo(pro.i - 1); else proGo(pro.i + 1);
+    });
+    app.setAttribute('aria-live', 'off'); // 文の欄だけを読み上げさせる（入れ子の読み上げを避ける）
+    app.appendChild(stage);
+    var pauseBtn = el('button', { class: 'btn pbtn', id: 'ppause', text: '一時停止', onclick: function () { proPause(!pro.paused); } });
+    var skipBtn = el('button', { class: 'btn pskip', text: 'とばす', onclick: function () { proFinish(false); } });
+    // フォーカスの順は、前へ・次へ（文の下）→ 一時停止 → とばす。見た目は「とばす」を左にする
+    // 動きを減らす設定では自動で送らないので、一時停止は出さない
+    bar(reduceMotion ? [skipBtn] : [pauseBtn, skipBtn]);
+    proShow(0);
+    stage.focus({ preventScroll: true });
+  }
+
+  function proShow(i) {
+    var line = document.getElementById('pline');
+    if (!line) return;
+    clearTimeout(pro.timer);
+    pro.i = i;
+    line.classList.remove('in', 'out');
+    line.textContent = PROLOGUE[i];
+    var dots = document.querySelectorAll('.pdots i');
+    for (var k = 0; k < dots.length; k++) dots[k].className = k <= i ? 'on' : '';
+    void line.offsetWidth; // 出る動きをやり直す
+    line.classList.add('in');
+    proSchedule();
+  }
+
+  function proSchedule() {
+    clearTimeout(pro.timer);
+    if (reduceMotion || pro.paused) return;
+    var ms = Math.ceil(PROLOGUE[pro.i].replace(/\n/g, '').length / 4 + 1) * 1000;
+    pro.timer = setTimeout(function () { proGo(pro.i + 1); }, ms);
+  }
+
+  function proGo(i) {
+    if (!pro || i < 0) return;
+    clearTimeout(pro.timer);
+    var line = document.getElementById('pline');
+    var after = function () { if (i >= PROLOGUE.length) proFinish(true); else proShow(i); };
+    if (reduceMotion || !line) { after(); return; }
+    line.classList.remove('in');
+    line.classList.add('out');
+    pro.timer = setTimeout(after, FADE_OUT_MS);
+  }
+
+  function proPause(on) {
+    pro.paused = on;
+    var b = document.getElementById('ppause');
+    if (b) b.textContent = on ? '再開' : '一時停止';
+    var m = document.getElementById('ppaused');
+    if (m) m.hidden = !on;
+    if (on) clearTimeout(pro.timer); else proSchedule();
+  }
+
+  // 最後まで見た（done）か、とばしたか。どちらでも次から出さない
+  function proFinish(done) {
+    if (!pro) return;
+    clearTimeout(pro.timer);
+    var sec = Math.round((Date.now() - pro.started) / 1000);
+    var at = pro.i + 1;
+    pro = null;
+    state.prologueSeen = true;
+    if (state.testerOn) {
+      var log = state.tlog || (state.tlog = { sec: {}, order: [] });
+      // 初回の記録を残す（「はじめての方へ」で見直しても上書きしない）
+      if (!log.prologue) log.prologue = done ? '最後まで見た・' + sec + '秒' : at + '文目でとばした・' + sec + '秒';
+    }
+    screenStart = Date.now();
+    save();
+    document.body.classList.remove('pro-on');
+    app.setAttribute('aria-live', 'polite');
+    landingFade = true;
+    app.innerHTML = '';
+    renderIntro();
+    window.scrollTo(0, 0);
+    var h = document.querySelector('.landing h1');
+    if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); }
+  }
+
+  // スタート画面（プロローグの着地先）。最初に見える文字を見出し・見本・補足・ボタンに絞る
   function renderIntro() {
-    app.appendChild(el('h1', { text: 'マンション購入 AI相談シート' }));
-    app.appendChild(el('p', { class: 'sub', text: 'v0.4（試作版）' }));
-    app.appendChild(el('div', { class: 'card hero' }, [
-      el('h2', { text: '8つの質問で、毎月の返済の目安が出ます' }),
+    if (showPrologue() || pro) { renderPrologue(); return; }
+    var wrap = el('div', { class: 'landing' + (landingFade ? ' fadein' : '') });
+    landingFade = false;
+    wrap.appendChild(el('p', { class: 'appname' }, [el('b', { text: 'マンション購入 AI相談シート' }), el('span', { text: 'v0.5（試作版）' })]));
+    wrap.appendChild(el('div', { class: 'card hero' }, [
+      el('h1', { text: '8つの質問で、毎月の返済の目安が出ます' }),
       el('div', { class: 'kpi preview', 'aria-label': '目安の見本（あなたの数字で埋まります）' }, [
         el('div', {}, [el('span', { text: '毎月の返済' }), el('b', { text: '― 円' })]),
         el('div', {}, [el('span', { text: '完済するときの年齢' }), el('b', { text: '― 歳' })]),
@@ -612,17 +734,23 @@
       ]),
       el('p', { class: 'sub', style: 'margin:6px 0 0', text: '↑ あなたの数字で、ここが埋まります' })
     ]));
-    app.appendChild(el('ul', { class: 'easy' }, [
-      el('li', { text: '最初は「配偶者」「子ども」を選ぶだけ。答えが必要なのは、年齢・年収・物件価格・金利の4つです（金利は「分からない」でも進めます）。' }),
-      el('li', { text: '借入額と返済期間は、シートが入れておきます。あとで直せます。' }),
-      el('li', { text: '家計や物件の細かい数字は、目安を見たあとで入れられます（任意）。' }),
-      el('li', { text: '登録はいりません。入力した内容はこの端末のブラウザの中に保存されます。最後にAIのボタンを押すか、相談用の文章をコピーして貼るまでは、どこにも送られません。' })
-    ]));
-    app.appendChild(renderOverview());
-    app.appendChild(el('p', { class: 'sub', text: '最後に、ChatGPT・Claude・Gemini にそのまま渡せる「相談用の文章」を作ります。AIに渡すと、その内容は選んだAIサービスに送られます（送られ方は結果の画面で説明します）。' }));
-    app.appendChild(el('p', { class: 'sub', text: 'このシートは計算と一般的な目安との比較をするもので、購入の可否や金融商品の選択を助言するものではありません。' }));
+    wrap.appendChild(el('p', { class: 'sub', text: '必須は4つ。借入額と返済期間は自動で入ります。' }));
+    wrap.appendChild(renderOverview());
+    var about = el('details', { class: 'card all' }, [el('summary', { text: '保存と送信について' }),
+      el('p', { class: 'sub', text: '登録はいりません。入力した内容はこの端末のブラウザの中に保存されます。最後にAIのボタンを押すか、相談用の文章をコピーして貼るまでは、どこにも送られません。' }),
+      el('p', { class: 'sub', text: '最後に、ChatGPT・Claude・Gemini にそのまま渡せる「相談用の文章」を作ります。AIに渡すと、その内容は選んだAIサービスに送られます（送られ方は結果の画面で説明します）。' }),
+      el('p', { class: 'sub', style: 'margin:0', text: 'このシートは計算と一般的な目安との比較をするもので、購入の可否や金融商品の選択を助言するものではありません。' })
+    ]);
+    if (state.aboutOpen) about.open = true;
+    about.addEventListener('toggle', function () { state.aboutOpen = about.open; save(); });
+    wrap.appendChild(about);
+    wrap.appendChild(el('button', { type: 'button', class: 'link', text: 'はじめての方へ（もう一度見る）', onclick: function () {
+      app.innerHTML = '';
+      renderPrologue();
+    } }));
+    app.appendChild(wrap);
     var started = state.lastStep !== undefined;
-    bar([el('button', { class: 'btn primary', text: started ? '続きから' : 'はじめる', onclick: function () { go(started ? state.lastStep : 0); } })]);
+    bar([el('button', { class: 'btn primary', text: started ? '続きから' : '自分の数字で試す', onclick: function () { go(started ? state.lastStep : 0); } })]);
     if (started) app.appendChild(el('button', { class: 'link', text: '入力内容を消して最初から', onclick: confirmClear }));
     appendTesterMemo();
   }
