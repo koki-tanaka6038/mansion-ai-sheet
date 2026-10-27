@@ -1,4 +1,4 @@
-// マンション購入 AI相談シート v0.5 — 画面
+// マンション購入 AI相談シート v0.6 — 画面
 // 回答はこの端末のブラウザ（localStorage）にだけ保存する。外に出るのは、結果の画面で本人がAIのボタンを押すか相談文をコピーして貼ったときだけ。
 // v0.4：最初の8問（第1段）→ 目安の画面 → くわしく入れる（第2段・任意）→ 気になること → 結果、の2段構え
 (function () {
@@ -28,7 +28,6 @@
       stage: 1,
       title: '検討中の物件',
       lead: '販売図面や物件ページに書いてあります。',
-      importable: true,
       fields: [
         { id: 'price', label: '物件価格', type: 'number', unit: '万円', required: true }
       ]
@@ -58,9 +57,8 @@
     {
       stage: 2,
       title: '物件の詳細',
-      lead: '物件ページの文章を貼り付けると、まとめて入力できます。',
+      lead: '販売図面や物件ページの「物件概要」に書いてあります。',
       gain: '管理費・修繕積立金を含めた月の住居費と、修繕積立金の㎡単価を出します。',
-      importable: true,
       fields: [
         { id: 'area', label: '専有面積', type: 'number', unit: '㎡', unknown: true, step: '0.01', hint: '例：70.12',
           where: ['物件ページの「物件概要」や販売図面に、「専有面積　70.12㎡（壁芯）」のように書いてあります。', '「壁芯」「内法」のどちらでも、書いてある数字をそのまま入れてください。バルコニー面積や間取り図の各部屋の広さは足しません。'] },
@@ -420,7 +418,7 @@
     setTimeout(function () { box.classList.remove('flash'); }, 1200);
   }
 
-  // ---- 物件ページの文章から読み込む ----
+  // ---- 物件ページから読み込んだ値の印（v0.6 で読み込みはやめた。古い保存データの印だけ扱う） ----
 
   var IMPORT_LABEL = { price: ['物件価格', '万円'], area: ['専有面積', '㎡'], builtYear: ['建築年', '年'],
     mgmtFee: ['管理費', '円'], repairFee: ['修繕積立金', '円'], scale: ['建物の規模', ''] };
@@ -430,39 +428,7 @@
     return !!v && v[id] !== undefined && String(state.answers[id]) === String(v[id]) && !state.unknown[id];
   }
 
-  function renderImport() {
-    var ta = el('textarea', { id: 'importText', placeholder: '例：\n価格　5980万円\n専有面積　70.12m2（壁芯）\n完成時期（築年月）　1998年3月\n管理費　1万2000円／月\n修繕積立金　1万5600円／月' });
-    var msg = el('div', { class: 'hint', id: 'importMsg', role: 'status' });
-    var det = el('details', { class: 'card import' }, [
-      el('summary', { text: '物件ページの文章から読み込む（任意）' }),
-      el('p', { class: 'sub', text: 'SUUMO などの物件ページの「物件概要」の部分をコピーして、下に貼り付けてください。価格・専有面積・築年・管理費・修繕積立金を読み取って入力します（物件価格以外は「くわしく入れる」の物件の詳細に入ります）。' }),
-      el('p', { class: 'sub', text: 'URL だけでは読み込めません（このシートは物件サイトに接続しないため）。コピーは、物件概要の文字を長押し →「すべてを選択」または範囲を広げて「コピー」。' }),
-      ta,
-      el('div', { class: 'row', style: 'margin-top:8px' }, [
-        el('button', { type: 'button', class: 'btn', text: '読み込む', onclick: function () { ta.blur(); doImport(ta.value); } })
-      ]),
-      msg
-    ]);
-    if (state.importOpen) det.open = true;
-    det.addEventListener('toggle', function () { state.importOpen = det.open; save(); });
-    return det;
-  }
-
-  function importedParts(keys) {
-    return keys.map(function (k) {
-      var L = IMPORT_LABEL[k], v = state.answers[k];
-      if (k === 'scale') return L[0] + '：20階以上';
-      return L[0] + ' ' + (k === 'builtYear' ? String(v) : Number(v).toLocaleString('ja-JP')) + L[1];
-    });
-  }
-
-  function importedNoteText() {
-    var still = Object.keys(IMPORT_LABEL).filter(isImported);
-    return still.length ? '物件ページから読み込んだ値：' + importedParts(still).join('、') + '。違っていたら直してください。' : '';
-  }
   function refreshImported() {
-    var note = document.getElementById('importedNote');
-    if (note) { note.textContent = importedNoteText(); note.hidden = !note.textContent; }
     Object.keys(IMPORT_LABEL).forEach(function (k) {
       var q = document.querySelector('#f-' + k + ' label.q');
       if (!q) return;
@@ -471,34 +437,6 @@
       else if (!isImported(k) && tag) tag.remove();
     });
   }
-
-  function doImport(text) {
-    var r = Parse.parseListing(text);
-    var keys = Object.keys(r);
-    if (!keys.length) {
-      setImportMsg('読み取れる項目が見つかりませんでした。「価格」「専有面積」などの見出しを含めてコピーしてください。');
-      return;
-    }
-    state.importedVals = state.importedVals || {};
-    keys.forEach(function (k) {
-      state.answers[k] = String(r[k]);
-      state.unknown[k] = false;
-      state.importedVals[k] = String(r[k]);
-    });
-    state.imported = keys;
-    state.importOpen = false;
-    save();
-    renderStep(state.step, true);
-    var here = keys.filter(function (k) { return document.getElementById('f-' + k); });
-    here.forEach(function (k) { document.getElementById('f-' + k).classList.add('flash'); });
-    var elsewhere = keys.length - here.length;
-    toast(keys.length + '項目を読み込みました' + (elsewhere ? '（うち' + elsewhere + '項目は「' + (state.step === 1 ? '物件の詳細' : '検討中の物件') + '」に入りました）' : ''), elsewhere ? 3200 : 1800);
-    var note = document.getElementById('importedNote');
-    var first = here.length ? document.getElementById('f-' + here[0]) : note;
-    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-
-  function setImportMsg(t) { var m = document.getElementById('importMsg'); if (m) m.textContent = t; }
 
   // ---- テスター用メモ（?tester=1 で開いたときだけ。入力した数字・選んだ内容は入れない。送信もしない） ----
 
@@ -601,7 +539,7 @@
       ]));
     });
     var det = el('details', { class: 'card all' }, [el('summary', { text: '全部の項目を見る' })].concat(rows).concat([
-      el('p', { class: 'sub', style: 'margin:10px 0 0', text: '手元にあると早いもの：源泉徴収票、物件ページ（SUUMOなど。物件の画面で文章を貼ると、数字がまとめて入ります）、銀行の事前審査や見積もり。' })
+      el('p', { class: 'sub', style: 'margin:10px 0 0', text: '手元にあると早いもの：源泉徴収票、物件ページ（SUUMOなどの物件概要）、銀行の事前審査や見積もり。' })
     ]));
     if (state.overviewOpen) det.open = true;
     det.addEventListener('toggle', function () { state.overviewOpen = det.open; save(); });
@@ -723,7 +661,7 @@
     if (showPrologue() || pro) { renderPrologue(); return; }
     var wrap = el('div', { class: 'landing' + (landingFade ? ' fadein' : '') });
     landingFade = false;
-    wrap.appendChild(el('p', { class: 'appname' }, [el('b', { text: 'マンション購入 AI相談シート' }), el('span', { text: 'v0.5（試作版）' })]));
+    wrap.appendChild(el('p', { class: 'appname' }, [el('b', { text: 'マンション購入 AI相談シート' }), el('span', { text: 'v0.6（試作版）' })]));
     wrap.appendChild(el('div', { class: 'card hero' }, [
       el('h1', { text: '8つの質問で、毎月の返済の目安が出ます' }),
       el('div', { class: 'kpi preview', 'aria-label': '目安の見本（あなたの数字で埋まります）' }, [
@@ -912,21 +850,13 @@
     app.appendChild(el('h2', { text: s.title }));
     app.appendChild(el('p', { class: 'sub', text: s.lead }));
     if (s.gain) app.appendChild(el('p', { class: 'gain', text: '入れると：' + s.gain }));
-    if (s.importable) {
-      app.appendChild(renderImport());
-      if (state.importedVals) {
-        var note = el('div', { class: 'hint', id: 'importedNote', text: importedNoteText() });
-        note.hidden = !note.textContent;
-        app.appendChild(note);
-      }
-    }
     var card = el('div', { class: 'card' });
     s.fields.forEach(function (f) {
       if (f.when && !f.when(a)) return;
       card.appendChild(renderField(f));
     });
     app.appendChild(card);
-    if (s.stage === 2) app.appendChild(el('button', { type: 'button', class: 'link', text: '残りは入れずに、相談文へ進む', onclick: function () { state.skipDetail = false; go(WORRY); } }));
+    if (s.stage === 2) app.appendChild(el('button', { type: 'button', class: 'link', text: '残りは入れずに、相談文へ進む', onclick: function () { state.skipDetail = false; forward(WORRY); } }));
     updateSuggest();
     renderChecklist();
     appendTesterMemo();
@@ -959,10 +889,73 @@
     if (firstErr) { firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     var p = tally().per[i];
     justDone = { title: STEPS[i].title, filled: p.filled, total: p.total, si: i };
-    go(i === FIRST_DETAIL - 1 ? CARD : i + 1);
+    forward(i === FIRST_DETAIL - 1 ? CARD : i + 1);
+  }
+
+  // 次の画面に進む前に、中央に短い案内を出す（「次へ」で進むときだけ。戻る・一覧から飛ぶときは出さない）
+  var INTERLUDE = {
+    1: '次は、検討中の物件について\n教えてください。',
+    2: '次は、お金の計画です。\n借入額と返済期間は入っています。',
+    card: 'ここまでの数字で、\n毎月の返済の目安を出しました。',
+    3: 'ここからは任意です。\nまずは、今の家計について。',
+    4: '次は、物件の詳細について\n教えてください。',
+    5: '次は、収入や家族、\nローンの詳細について。',
+    6: '最後に、気になっていることを\n教えてください。'
+  };
+  var interlude = null;
+  function forward(t) {
+    var msg = INTERLUDE[t];
+    if (!msg) { go(t); return; }
+    clearTimeout(interlude && interlude.timer);
+    logLeave();
+    interlude = { t: t };
+    document.body.classList.add('pro-on');
+    app.innerHTML = '';
+    var line = el('p', { class: 'pline', 'aria-live': 'polite', text: msg });
+    var stage = el('div', { class: 'prologue interlude', role: 'region', 'aria-label': '次の画面の案内', tabindex: '-1', onclick: function () { endInterlude(); } }, [line]);
+    app.setAttribute('aria-live', 'off');
+    app.appendChild(stage);
+    var top = document.getElementById('top'); if (top) top.hidden = true;
+    bar([el('button', { class: 'btn primary', text: '次へ', onclick: function () { endInterlude(); } })]);
+    window.scrollTo(0, 0);
+    void line.offsetWidth;
+    line.classList.add('in');
+    stage.focus({ preventScroll: true });
+    // 表示は「字数÷6秒」、短くても2秒。タップか「次へ」ですぐ進める
+    var ms = Math.max(2000, Math.ceil(msg.replace(/\n/g, '').length / 6 * 1000));
+    interlude.timer = setTimeout(endInterlude, ms);
+  }
+  function endInterlude() {
+    if (!interlude) return;
+    var t = interlude.t;
+    clearTimeout(interlude.timer);
+    interlude = null;
+    var line = document.querySelector('.interlude .pline');
+    var from = state.step;
+    var done = function () {
+      document.body.classList.remove('pro-on');
+      app.setAttribute('aria-live', 'polite');
+      if (state.step !== from) return;
+      screenStart = Date.now();
+      go(t);
+      focusHeading();
+    };
+    if (reduceMotion || !line) { done(); return; }
+    line.classList.remove('in');
+    line.classList.add('out');
+    setTimeout(done, FADE_OUT_MS);
+  }
+
+  // 案内のあとは、新しい画面の見出しにフォーカスを移す（読み上げの人が場所を見失わないように）
+  function focusHeading() {
+    var h = app.querySelector('h2');
+    if (!h) return;
+    h.setAttribute('tabindex', '-1');
+    h.focus({ preventScroll: true });
   }
 
   function go(i) {
+    if (interlude) { clearTimeout(interlude.timer); interlude = null; document.body.classList.remove('pro-on'); app.setAttribute('aria-live', 'polite'); }
     logLeave();
     state.step = i;
     if (isStep(i) && STEPS[i].stage === 2) state.skipDetail = false;
@@ -971,6 +964,9 @@
     save();
     render();
     window.scrollTo(0, 0);
+    app.classList.remove('enter');
+    void app.offsetWidth;
+    app.classList.add('enter');
   }
 
   function row(label, value) {
@@ -1070,8 +1066,8 @@
     ].concat(rows)));
     appendTesterMemo();
     bar([
-      el('button', { class: 'btn', text: 'このまま相談文へ', onclick: function () { state.skipDetail = true; go(WORRY); } }),
-      el('button', { class: 'btn primary', text: 'くわしく入れる', onclick: function () { state.skipDetail = false; go(FIRST_DETAIL); } })
+      el('button', { class: 'btn', text: 'このまま相談文へ', onclick: function () { state.skipDetail = true; forward(WORRY); } }),
+      el('button', { class: 'btn primary', text: 'くわしく入れる', onclick: function () { state.skipDetail = false; forward(FIRST_DETAIL); } })
     ]);
   }
 

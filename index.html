@@ -130,15 +130,7 @@
   .ovrow.some .box { border-color: var(--accent); }
   .field.flash { animation: flash 1.2s ease-out; border-radius: 10px; }
   @keyframes flash { 0% { background: var(--soft); box-shadow: 0 0 0 8px var(--soft); } 100% { background: transparent; box-shadow: 0 0 0 8px transparent; } }
-  details.import summary { font-weight: 600; cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 6px; list-style: none; }
-  details.import summary::-webkit-details-marker { display: none; }
-  details.import summary::before { content: "▸"; color: var(--accent); }
-  details.import[open] summary::before { content: "▾"; }
-  details.import.intro { margin: 8px 0 0 24px; padding: 4px 12px; }
-  details.import.intro summary { font-size: .9rem; }
   .ovrow.flash { animation: flash 1.2s ease-out; }
-  .imported-now { margin: 8px 0 0 24px; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--soft); border-radius: 0 10px 10px 0; font-size: .9rem; }
-  .imported-now p { margin: 0 0 4px; }
   .tag.imp { color: var(--accent); border-color: var(--accent); }
   /* 難しい項目の「どこに書いてある？」 */
   details.where { margin: 0 0 6px; font-size: .85rem; color: var(--sub); }
@@ -222,6 +214,10 @@
   .bar .pskip { order: -1; }
   .bar .pbtn, .bar .pskip { flex: 1; }
   .landing.fadein { animation: slidein .5s ease-out; }
+  /* v0.6：画面が替わるときにふわっと出す／区切りの案内 */
+  main.enter { animation: pagein .45s ease-out; }
+  @keyframes pagein { 0% { opacity: 0; transform: translateY(6px); } 100% { opacity: 1; transform: none; } }
+  .interlude { padding-bottom: 20vh; }
   .appname { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 0; font-size: .85rem; color: var(--sub); }
   .appname b { color: var(--text); font-size: .95rem; }
   .hero h1 { font-size: 1.25rem; margin: 0 0 10px; }
@@ -235,7 +231,6 @@
 <div class="toast" id="toast" role="status"></div>
 <noscript><p style="padding:16px">このページは JavaScript を使います。ブラウザの設定で有効にしてください。</p></noscript>
 <script src="calc.js"></script>
-<script src="parse.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
